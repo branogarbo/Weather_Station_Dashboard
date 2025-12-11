@@ -1,14 +1,21 @@
 {% extends "layout.html" %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h4 mb-0">Readings for <span class="text-primary">{{ device_id }}</span></h1>
-    <div class="d-flex gap-2">
+    <h1 class="h4 mb-0">Readings</h1>
+    <div class="d-flex gap-2 align-items-center">
         <label class="visually-hidden" for="attr-select">Attribute</label>
         <select id="attr-select" class="form-select form-select-sm">
             {% for a in possible_attrs %}
             <option value="{{ a }}" {% if a==selected_attr %}selected{% endif %}>{{ a|capitalize }}</option>
             {% endfor %}
         </select>
+
+        <label class="visually-hidden" for="page-size">Page</label>
+        <input id="page-size" type="number" min="1" max="500" class="form-control form-control-sm" style="width:80px"
+            value="{{ page_size }}">
+
+        <button id="first-btn" class="btn btn-sm btn-outline-secondary">First</button>
+        <button id="next-btn" class="btn btn-sm btn-outline-primary">Next</button>
         <button id="refresh-btn" class="btn btn-sm btn-outline-secondary">Refresh</button>
     </div>
 </div>
@@ -28,7 +35,7 @@
     <div class="col-12 col-lg-6">
         <div class="card shadow-sm">
             <div class="card-body">
-                <h5 class="card-title mb-3">Recent Readings ({{ limit }})</h5>
+                <h5 class="card-title mb-3">Page Readings ({{ limit }})</h5>
                 <div class="table-responsive fixed-height">
                     <table class="table table-sm table-striped mb-0">
                         <thead class="table-light sticky-top">
@@ -38,7 +45,6 @@
                                 <th>Humidity (%)</th>
                                 <th>Pressure (hPa)</th>
                                 <th>Battery (%)</th>
-                                <th>ID</th>
                             </tr>
                         </thead>
                         <tbody id="readings-tbody">
@@ -49,12 +55,12 @@
                                 <td>{{ r.humidity if r.humidity is not none else "-" }}</td>
                                 <td>{{ r.pressure if r.pressure is not none else "-" }}</td>
                                 <td>{{ r.battery if r.battery is not none else "-" }}</td>
-                                <td class="text-monospace small text-break">{{ r.id }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
+                <div class="mt-2 text-muted small">Showing this page only — use Next to fetch the next page.</div>
             </div>
         </div>
     </div>
@@ -63,33 +69,28 @@
 <script>
     const apiUrl = "{{ url_for('api_readings') }}";
     let chart = null;
+    // safely inject server-provided token into JS
+    let nextKey = {{ next_token| tojson }};
+    let currentAttr = "{{ selected_attr }}";
 
-    /**
-     * Build or replace the Chart.js chart.
-     * Container has fixed height; chart will fill it (maintainAspectRatio: false).
-     */
-    function buildChart(ctx, labels, dataPoints, labelName) {
-        if (chart) {
-            chart.destroy();
-        }
-
-        // if dataPoints are all NaN or empty, create an empty dataset to avoid errors
-        const hasValidData = dataPoints.some(v => Number.isFinite(v));
-        const dataset = {
-            label: labelName,
-            data: labels.map((t, i) => ({ x: t, y: dataPoints[i] })),
-            tension: 0.2,
-            fill: false,
-        };
+    /** Build Chart.js chart (fills fixed-height container) */
+    function buildChart(ctx, dataPoints, labelName) {
+        if (chart) chart.destroy();
 
         chart = new Chart(ctx, {
             type: 'line',
             data: {
-                datasets: [dataset]
+                datasets: [{
+                    label: labelName,
+                    data: dataPoints,         // array of {x: isoString, y: number|null}
+                    tension: 0.2,
+                    fill: false,
+                    spanGaps: false
+                }]
             },
             options: {
                 responsive: true,
-                maintainAspectRatio: false, // allow chart to fill parent .chart-container
+                maintainAspectRatio: false,
                 scales: {
                     x: {
                         type: 'time',
@@ -104,53 +105,58 @@
                                 day: 'MMM d'
                             }
                         },
-                        ticks: {
-                            maxRotation: 0,
-                            autoSkip: true,
-                            maxTicksLimit: 10
-                        }
+                        ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }
                     },
                     y: {
                         beginAtZero: false,
-                        ticks: {
-                            autoSkip: true
-                        }
+                        ticks: { autoSkip: true }
                     }
                 },
                 plugins: {
                     legend: { display: false },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false
-                    }
+                    tooltip: { mode: 'index', intersect: false }
                 },
-                interaction: {
-                    mode: 'nearest',
-                    intersect: false
-                }
+                interaction: { mode: 'nearest', intersect: false }
             }
         });
-
-        // If there's no valid numeric data, show a small hint by clearing dataset and drawing placeholder
-        if (!hasValidData) {
-            chart.data.datasets[0].data = [];
-            chart.update();
-        }
     }
 
-    async function fetchReadings() {
-        try {
-            const resp = await fetch(apiUrl);
-            if (!resp.ok) {
-                console.error('Failed to fetch readings', resp.statusText);
-                return [];
+    /** Build dataPoints array from readings */
+    function buildDataPoints(readings, attr) {
+        // readings expected sorted descending server-side; we want time ascending for line
+        const rev = readings.slice().reverse();
+
+        const dataPoints = [];
+        for (const r of rev) {
+            const rawTs = (r.timestamp || "").toString().trim();
+            if (!rawTs || rawTs === "N/A") continue;        // skip invalid timestamps
+
+            // Parse numeric value; allow null (so Chart.js shows gap) if not present
+            let rawV = r[attr];
+            let y = null;
+            if (rawV !== undefined && rawV !== null && rawV !== "-" && rawV !== "") {
+                const n = Number(rawV);
+                if (Number.isFinite(n)) y = n;
+                else y = null;
             }
-            const data = await resp.json();
-            return data.readings || [];
-        } catch (e) {
-            console.error('Error fetching readings', e);
-            return [];
+
+            // push valid data point (x must be parseable ISO or epoch string)
+            dataPoints.push({ x: rawTs, y: y });
         }
+
+        return dataPoints;
+    }
+
+    async function fetchPage(pageSize = 50, lastKey = null) {
+        const params = new URLSearchParams();
+        params.set('limit', String(pageSize));
+        if (lastKey) params.set('last_key', lastKey);
+        const resp = await fetch(apiUrl + '?' + params.toString());
+        if (!resp.ok) {
+            console.error('Failed to fetch page', resp.statusText);
+            return { readings: [], next_key: null };
+        }
+        return await resp.json();
     }
 
     function updateTable(readings) {
@@ -164,43 +170,75 @@
       <td>${r.humidity ?? '-'}</td>
       <td>${r.pressure ?? '-'}</td>
       <td>${r.battery ?? '-'}</td>
-      <td class="text-monospace small text-break">${r.id}</td>
     `;
             tbody.appendChild(tr);
         }
     }
 
-    function buildChartData(readings, attr) {
-        // readings are returned sorted descending server-side; reverse to show time asc
-        const rev = readings.slice().reverse();
-        const labels = [];
-        const values = [];
-        for (const r of rev) {
-            labels.push(r.timestamp || null);
-            const v = r[attr];
-            values.push(v === null || v === undefined ? NaN : Number(v));
-        }
-        return { labels, values };
+    function updateButtons() {
+        document.getElementById('next-btn').disabled = !nextKey;
     }
 
-    async function refresh() {
-        const readings = await fetchReadings();
+    async function loadFirstPage() {
+        const pageSize = Number(document.getElementById('page-size').value) || 50;
+        nextKey = null;
+        const res = await fetchPage(pageSize, null);
+        nextKey = res.next_key || null;
+        const readings = res.readings || [];
         updateTable(readings);
+        updateChart(readings);
+        updateButtons();
+    }
 
+    async function loadNextPage() {
+        if (!nextKey) return;
+        const pageSize = Number(document.getElementById('page-size').value) || 50;
+        const res = await fetchPage(pageSize, nextKey);
+        nextKey = res.next_key || null;
+        const readings = res.readings || [];
+        updateTable(readings);
+        updateChart(readings);
+        updateButtons();
+    }
+
+    function updateChart(readings) {
         const attr = document.getElementById('attr-select').value;
         document.getElementById('chart-attr').textContent = attr.charAt(0).toUpperCase() + attr.slice(1);
-        const { labels, values } = buildChartData(readings, attr);
+        const dataPoints = buildDataPoints(readings, attr);
         const ctx = document.getElementById('trendChart').getContext('2d');
-        buildChart(ctx, labels, values, attr);
+        buildChart(ctx, dataPoints, attr);
     }
 
+    // Event handlers
     document.getElementById('attr-select').addEventListener('change', () => {
-        refresh();
+        // rebuild chart using currently loaded page rows (read from DOM table)
+        const rows = Array.from(document.querySelectorAll('#readings-tbody tr'));
+        const readings = rows.map(tr => ({
+            timestamp: tr.children[0].textContent,
+            temperature: tr.children[1].textContent === '-' ? null : tr.children[1].textContent,
+            humidity: tr.children[2].textContent === '-' ? null : tr.children[2].textContent,
+            pressure: tr.children[3].textContent === '-' ? null : tr.children[3].textContent,
+            battery: tr.children[4].textContent === '-' ? null : tr.children[4].textContent
+        }));
+        updateChart(readings);
     });
-    document.getElementById('refresh-btn').addEventListener('click', () => refresh());
+
+    document.getElementById('refresh-btn').addEventListener('click', () => loadFirstPage());
+    document.getElementById('first-btn').addEventListener('click', () => loadFirstPage());
+    document.getElementById('next-btn').addEventListener('click', () => loadNextPage());
 
     window.addEventListener('DOMContentLoaded', () => {
-        refresh();
+        // initial chart render with server-side preloaded readings in template
+        const initialRows = Array.from(document.querySelectorAll('#readings-tbody tr'));
+        const initialReadings = initialRows.map(tr => ({
+            timestamp: tr.children[0].textContent,
+            temperature: tr.children[1].textContent === '-' ? null : tr.children[1].textContent,
+            humidity: tr.children[2].textContent === '-' ? null : tr.children[2].textContent,
+            pressure: tr.children[3].textContent === '-' ? null : tr.children[3].textContent,
+            battery: tr.children[4].textContent === '-' ? null : tr.children[4].textContent
+        }));
+        updateChart(initialReadings);
+        updateButtons();
     });
 </script>
 {% endblock %}
