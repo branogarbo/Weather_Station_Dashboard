@@ -6,33 +6,55 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{{ title or "Weather Station Dashboard" }}</title>
 
-    <!-- Bootstrap 5 (CDN) -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <!-- Bootstrap 5 CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <!-- Chart.js UMD build (browser) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+    <!-- Chart.js date adapter using date-fns (bundled) -->
+    <script
+        src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+
+    <style>
+        /* Fixed-height container for the chart so Chart.js doesn't grow infinitely */
+        .chart-container {
+            height: 320px;
+            /* fixed height — adjust as desired */
+            position: relative;
+        }
+
+        /* Ensure canvas fills the container */
+        .chart-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        /* Make table body scrollable while header sticks */
+        .table-responsive.fixed-height {
+            max-height: 420px;
+            overflow: auto;
+        }
+
+        .sticky-top {
+            position: sticky;
+            top: 0;
+            z-index: 2;
+        }
+    </style>
 </head>
 
 <body class="bg-light">
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
         <div class="container">
             <a class="navbar-brand" href="{{ url_for('dashboard') }}">Weather Station</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarsExample"
-                aria-controls="navbarsExample" aria-expanded="false" aria-label="Toggle navigation">
-                <span class="navbar-toggler-icon"></span>
-            </button>
-
-            <div class="collapse navbar-collapse" id="navbarsExample">
-                <ul class="navbar-nav ms-auto">
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('dashboard') }}">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="{{ url_for('example_post_page') }}">Ingest Example</a>
-                    </li>
-                </ul>
+            <div class="ms-auto text-white">
+                Device: <span class="fw-bold">{{ device_id or "N/A" }}</span>
             </div>
         </div>
     </nav>
 
-    <main class="container">
+    <main class="container mb-5">
         {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
         {% for category, message in messages %}
@@ -48,8 +70,8 @@
     </main>
 
     <footer class="text-center py-4 mt-5">
-        <small class="text-muted">Weather Station Dashboard — data from DynamoDB table
-            <code>{{ config.get('DDB_TABLE', 'weather_station_thing_readings') }}</code></small>
+        <small class="text-muted">Weather Station Dashboard — DynamoDB table
+            <code>{{ config.get('DDB_TABLE') }}</code></small>
     </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>

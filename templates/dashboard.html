@@ -1,49 +1,206 @@
 {% extends "layout.html" %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3">Sensor Readings</h1>
-    <form class="row g-2" method="get" action="{{ url_for('dashboard') }}">
-        <div class="col-auto">
-            <label class="visually-hidden" for="limit">Limit</label>
-            <input type="number" min="1" max="500" name="limit" id="limit" class="form-control form-control-sm"
-                value="{{ limit }}">
-        </div>
-        <div class="col-auto">
-            <button class="btn btn-sm btn-outline-primary" type="submit">Refresh</button>
-        </div>
-    </form>
+    <h1 class="h4 mb-0">Readings for <span class="text-primary">{{ device_id }}</span></h1>
+    <div class="d-flex gap-2">
+        <label class="visually-hidden" for="attr-select">Attribute</label>
+        <select id="attr-select" class="form-select form-select-sm">
+            {% for a in possible_attrs %}
+            <option value="{{ a }}" {% if a==selected_attr %}selected{% endif %}>{{ a|capitalize }}</option>
+            {% endfor %}
+        </select>
+        <button id="refresh-btn" class="btn btn-sm btn-outline-secondary">Refresh</button>
+    </div>
 </div>
 
-{% if readings %}
-<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-3">
-    {% for r in readings %}
-    <div class="col">
-        <div class="card h-100 shadow-sm">
+<div class="row g-4">
+    <div class="col-12 col-lg-6">
+        <div class="card shadow-sm">
             <div class="card-body">
-                <h5 class="card-title mb-1">Device: {{ r.thing_id }}</h5>
-                <h6 class="card-subtitle text-muted mb-2">{{ r.ts_human }}</h6>
-
-                <ul class="list-unstyled mb-2">
-                    <li><strong>Temperature:</strong> {{ r.temperature if r.temperature is not none else "N/A" }} °C
-                    </li>
-                    <li><strong>Humidity:</strong> {{ r.humidity if r.humidity is not none else "N/A" }} %</li>
-                    <li><strong>Pressure:</strong> {{ r.pressure if r.pressure is not none else "N/A" }} hPa</li>
-                    <li><strong>Battery:</strong> {{ r.battery if r.battery is not none else "N/A" }} %</li>
-                </ul>
-
-                <p class="mb-0 text-muted small">id: <code class="text-break">{{ r.id }}</code></p>
-            </div>
-            <div class="card-footer bg-transparent">
-                <div class="d-flex justify-content-between">
-                    <small class="text-muted">Last seen: {{ r.ts_human }}</small>
+                <h5 class="card-title mb-3">Trend — <span id="chart-attr">{{ selected_attr|capitalize }}</span></h5>
+                <div class="chart-container">
+                    <canvas id="trendChart"></canvas>
                 </div>
             </div>
         </div>
     </div>
-    {% endfor %}
+
+    <div class="col-12 col-lg-6">
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title mb-3">Recent Readings ({{ limit }})</h5>
+                <div class="table-responsive fixed-height">
+                    <table class="table table-sm table-striped mb-0">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Timestamp (UTC)</th>
+                                <th>Temperature (°C)</th>
+                                <th>Humidity (%)</th>
+                                <th>Pressure (hPa)</th>
+                                <th>Battery (%)</th>
+                                <th>ID</th>
+                            </tr>
+                        </thead>
+                        <tbody id="readings-tbody">
+                            {% for r in readings %}
+                            <tr>
+                                <td>{{ r._ts_iso or "N/A" }}</td>
+                                <td>{{ r.temperature if r.temperature is not none else "-" }}</td>
+                                <td>{{ r.humidity if r.humidity is not none else "-" }}</td>
+                                <td>{{ r.pressure if r.pressure is not none else "-" }}</td>
+                                <td>{{ r.battery if r.battery is not none else "-" }}</td>
+                                <td class="text-monospace small text-break">{{ r.id }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
-{% else %}
-<div class="alert alert-info">No readings found in table
-    <code>{{ config.get('DDB_TABLE', 'weather_station_thing_readings') }}</code>.</div>
-{% endif %}
+
+<script>
+    const apiUrl = "{{ url_for('api_readings') }}";
+    let chart = null;
+
+    /**
+     * Build or replace the Chart.js chart.
+     * Container has fixed height; chart will fill it (maintainAspectRatio: false).
+     */
+    function buildChart(ctx, labels, dataPoints, labelName) {
+        if (chart) {
+            chart.destroy();
+        }
+
+        // if dataPoints are all NaN or empty, create an empty dataset to avoid errors
+        const hasValidData = dataPoints.some(v => Number.isFinite(v));
+        const dataset = {
+            label: labelName,
+            data: labels.map((t, i) => ({ x: t, y: dataPoints[i] })),
+            tension: 0.2,
+            fill: false,
+        };
+
+        chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                datasets: [dataset]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false, // allow chart to fill parent .chart-container
+                scales: {
+                    x: {
+                        type: 'time',
+                        time: {
+                            parser: 'iso',
+                            tooltipFormat: 'yyyy-MM-dd HH:mm:ss',
+                            displayFormats: {
+                                millisecond: 'HH:mm:ss',
+                                second: 'HH:mm:ss',
+                                minute: 'HH:mm',
+                                hour: 'MM-dd HH:mm',
+                                day: 'MMM d'
+                            }
+                        },
+                        ticks: {
+                            maxRotation: 0,
+                            autoSkip: true,
+                            maxTicksLimit: 10
+                        }
+                    },
+                    y: {
+                        beginAtZero: false,
+                        ticks: {
+                            autoSkip: true
+                        }
+                    }
+                },
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false
+                    }
+                },
+                interaction: {
+                    mode: 'nearest',
+                    intersect: false
+                }
+            }
+        });
+
+        // If there's no valid numeric data, show a small hint by clearing dataset and drawing placeholder
+        if (!hasValidData) {
+            chart.data.datasets[0].data = [];
+            chart.update();
+        }
+    }
+
+    async function fetchReadings() {
+        try {
+            const resp = await fetch(apiUrl);
+            if (!resp.ok) {
+                console.error('Failed to fetch readings', resp.statusText);
+                return [];
+            }
+            const data = await resp.json();
+            return data.readings || [];
+        } catch (e) {
+            console.error('Error fetching readings', e);
+            return [];
+        }
+    }
+
+    function updateTable(readings) {
+        const tbody = document.getElementById('readings-tbody');
+        tbody.innerHTML = '';
+        for (const r of readings) {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+      <td>${r.timestamp || 'N/A'}</td>
+      <td>${r.temperature ?? '-'}</td>
+      <td>${r.humidity ?? '-'}</td>
+      <td>${r.pressure ?? '-'}</td>
+      <td>${r.battery ?? '-'}</td>
+      <td class="text-monospace small text-break">${r.id}</td>
+    `;
+            tbody.appendChild(tr);
+        }
+    }
+
+    function buildChartData(readings, attr) {
+        // readings are returned sorted descending server-side; reverse to show time asc
+        const rev = readings.slice().reverse();
+        const labels = [];
+        const values = [];
+        for (const r of rev) {
+            labels.push(r.timestamp || null);
+            const v = r[attr];
+            values.push(v === null || v === undefined ? NaN : Number(v));
+        }
+        return { labels, values };
+    }
+
+    async function refresh() {
+        const readings = await fetchReadings();
+        updateTable(readings);
+
+        const attr = document.getElementById('attr-select').value;
+        document.getElementById('chart-attr').textContent = attr.charAt(0).toUpperCase() + attr.slice(1);
+        const { labels, values } = buildChartData(readings, attr);
+        const ctx = document.getElementById('trendChart').getContext('2d');
+        buildChart(ctx, labels, values, attr);
+    }
+
+    document.getElementById('attr-select').addEventListener('change', () => {
+        refresh();
+    });
+    document.getElementById('refresh-btn').addEventListener('click', () => refresh());
+
+    window.addEventListener('DOMContentLoaded', () => {
+        refresh();
+    });
+</script>
 {% endblock %}
