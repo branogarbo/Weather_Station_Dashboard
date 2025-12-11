@@ -252,7 +252,7 @@ def authorize():
     token = oauth.oidc.authorize_access_token()
     user = token['userinfo']
     session['user'] = user
-    return redirect(url_for('index'))
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/logout')
