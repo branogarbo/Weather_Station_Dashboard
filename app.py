@@ -234,7 +234,7 @@ def fetch_readings_page(limit=50, last_key_token=None):
 def index():
     user = session.get('user')
     if user:
-        return f'Hello, {user["email"]}. <a href="/logout">Logout</a>'
+        return redirect(url_for('dashboard'))
     else:
         return f'Welcome! Please <a href="/login">Login</a>.'
 
@@ -252,7 +252,7 @@ def authorize():
     token = oauth.oidc.authorize_access_token()
     user = token['userinfo']
     session['user'] = user
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('index'))
 
 
 @app.route('/logout')
