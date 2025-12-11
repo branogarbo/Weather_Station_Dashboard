@@ -1,0 +1,5 @@
+Flask>=2.2
+boto3>=1.26
+python-dateutil>=2.8
+jinja2>=3.0
+python-dotenv>=1.0

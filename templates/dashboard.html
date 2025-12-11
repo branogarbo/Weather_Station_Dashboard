@@ -1,0 +1,49 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3">Sensor Readings</h1>
+    <form class="row g-2" method="get" action="{{ url_for('dashboard') }}">
+        <div class="col-auto">
+            <label class="visually-hidden" for="limit">Limit</label>
+            <input type="number" min="1" max="500" name="limit" id="limit" class="form-control form-control-sm"
+                value="{{ limit }}">
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-sm btn-outline-primary" type="submit">Refresh</button>
+        </div>
+    </form>
+</div>
+
+{% if readings %}
+<div class="row row-cols-1 row-cols-md-2 row-cols-lg-3 g-3">
+    {% for r in readings %}
+    <div class="col">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title mb-1">Device: {{ r.thing_id }}</h5>
+                <h6 class="card-subtitle text-muted mb-2">{{ r.ts_human }}</h6>
+
+                <ul class="list-unstyled mb-2">
+                    <li><strong>Temperature:</strong> {{ r.temperature if r.temperature is not none else "N/A" }} °C
+                    </li>
+                    <li><strong>Humidity:</strong> {{ r.humidity if r.humidity is not none else "N/A" }} %</li>
+                    <li><strong>Pressure:</strong> {{ r.pressure if r.pressure is not none else "N/A" }} hPa</li>
+                    <li><strong>Battery:</strong> {{ r.battery if r.battery is not none else "N/A" }} %</li>
+                </ul>
+
+                <p class="mb-0 text-muted small">id: <code class="text-break">{{ r.id }}</code></p>
+            </div>
+            <div class="card-footer bg-transparent">
+                <div class="d-flex justify-content-between">
+                    <small class="text-muted">Last seen: {{ r.ts_human }}</small>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% else %}
+<div class="alert alert-info">No readings found in table
+    <code>{{ config.get('DDB_TABLE', 'weather_station_thing_readings') }}</code>.</div>
+{% endif %}
+{% endblock %}

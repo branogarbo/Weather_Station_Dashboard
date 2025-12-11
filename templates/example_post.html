@@ -1,0 +1,21 @@
+{% extends "layout.html" %}
+{% block content %}
+<h1 class="h4 mb-3">Example: Send a Reading</h1>
+
+<p>Example JSON that a device can POST to <code>/api/readings</code>:</p>
+
+<pre>{
+  "thing_id": "station-001",
+  "timestamp": "2025-12-10T13:45:00Z",
+  "temperature": 22.4,
+  "humidity": 56.1,
+  "pressure": 1013.2,
+  "battery": 92
+}</pre>
+
+<p>cURL example:</p>
+<pre>curl -X POST -H "Content-Type: application/json" \
+  -d '@reading.json' http://localhost:5000/api/readings</pre>
+
+<a href="{{ url_for('dashboard') }}" class="btn btn-primary mt-3">Back to Dashboard</a>
+{% endblock %}
