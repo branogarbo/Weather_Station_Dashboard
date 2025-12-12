@@ -1,7 +1,16 @@
+"""
+app.py
+
+RDS-backed auth + protected routes.
+Unauthenticated access to protected routes -> redirect to 401 page.
+Unknown routes -> 404 page.
+
+Requires environment variables in .env:
+- WS_REGION, DDB_TABLE, FLASK_SECRET, DEVICE_ID, PORT
+- DATABASE_URL (SQLAlchemy URL for your RDS)
+"""
 import os
 import json
-import base64
-import requests
 from datetime import datetime
 from functools import wraps
 from urllib.parse import urlencode
@@ -14,41 +23,63 @@ from flask import (
     url_for,
     flash,
     session,
+    abort,
 )
 from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import pytz
 
-# Load .env
+# SQLAlchemy
+from sqlalchemy import Column, Integer, String, DateTime, func
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy import create_engine
+
+# password hashing
+from werkzeug.security import generate_password_hash, check_password_hash
+
 load_dotenv()
 
-# Config from environment
 AWS_REGION = os.getenv("WS_REGION", "us-east-1")
 DDB_TABLE = os.getenv("DDB_TABLE", "weather_station_thing_readings")
 FLASK_SECRET = os.getenv("FLASK_SECRET")
 DEVICE_ID = os.getenv("DEVICE_ID")
 PORT = int(os.getenv("PORT", "5000"))
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Cognito config (Hosted UI)
-# e.g. https://your-domain.auth.us-east-1.amazoncognito.com
-COGNITO_DOMAIN = os.getenv("COGNITO_DOMAIN")
-COGNITO_CLIENT_ID = os.getenv("COGNITO_CLIENT_ID")
-COGNITO_CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
-# must match configured redirect in Cognito
-COGNITO_REDIRECT_URI = os.getenv("COGNITO_REDIRECT_URI")
-
-if FLASK_SECRET is None:
-    raise RuntimeError("FLASK_SECRET env var is required")
+if not FLASK_SECRET:
+    raise RuntimeError("FLASK_SECRET is required")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL is required")
 
 app = Flask(__name__)
 app.secret_key = FLASK_SECRET
-app.config.setdefault("PERMANENT_SESSION_LIFETIME", 7 * 24 * 3600)  # 7 days
+app.config.setdefault("PERMANENT_SESSION_LIFETIME", 7 * 24 * 3600)
 
-# AWS resources
+# SQLAlchemy
+Base = declarative_base()
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
+SessionLocal = sessionmaker(
+    bind=engine, autoflush=False, autocommit=False, future=True)
+
+
+class User(Base):
+    __tablename__ = "users"
+    id = Column(Integer, primary_key=True)
+    email = Column(String(255), unique=True, index=True)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def verify_password(self, password: str) -> bool:
+        return check_password_hash(self.password_hash, password)
+
+
+Base.metadata.create_all(bind=engine)
+
+# AWS / DynamoDB / IoT
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 table = dynamodb.Table(DDB_TABLE)
-
 _iot_data_client = None
 
 
@@ -56,14 +87,10 @@ def get_iot_data_client():
     global _iot_data_client
     if _iot_data_client:
         return _iot_data_client
-
     iot = boto3.client("iot", region_name=AWS_REGION)
-    resp = iot.describe_endpoint(endpointType="iot:Data-ATS")
-    endpoint_addr = resp.get("endpointAddress")
-    if not endpoint_addr:
-        raise RuntimeError("Unable to determine IoT data endpoint")
+    ep = iot.describe_endpoint(endpointType="iot:Data-ATS")["endpointAddress"]
     _iot_data_client = boto3.client(
-        "iot-data", region_name=AWS_REGION, endpoint_url=f"https://{endpoint_addr}")
+        "iot-data", region_name=AWS_REGION, endpoint_url=f"https://{ep}")
     return _iot_data_client
 
 
@@ -71,7 +98,6 @@ def parse_payload_item(item):
     payload_raw = item.get("payload")
     if payload_raw is None:
         return None
-
     try:
         if isinstance(payload_raw, (bytes, bytearray)):
             data = json.loads(payload_raw.decode("utf-8"))
@@ -93,124 +119,124 @@ def parse_payload_item(item):
             data["_ts_dt"] = None
     else:
         data["_ts_dt"] = None
-
     return data
 
 
+# Authentication helpers
+def create_user(email: str, password: str):
+    hashed = generate_password_hash(
+        password, method="pbkdf2:sha256", salt_length=16)
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter(User.email == email).first()
+        if existing:
+            return None, "User already exists."
+        user = User(email=email, password_hash=hashed)
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+        return user, None
+    except SQLAlchemyError as e:
+        db.rollback()
+        return None, str(e)
+    finally:
+        db.close()
+
+
+def authenticate_user(email: str, password: str):
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        if user and user.verify_password(password):
+            return user
+        return None
+    finally:
+        db.close()
+
+
+# NOTE: Protected routes now redirect to the 401 page for unauthenticated access.
 def login_required(f):
-    """Decorator to require a logged-in user (session['user']). Redirects to /login with next param."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get("user"):
-            # preserve the original URL so user returns after login
-            next_url = request.url
-            return redirect(url_for("login") + "?" + urlencode({"next": next_url}))
+        if "user_id" not in session:
+            # redirect to 401 page (not to login) per your requirement
+            return redirect(url_for("unauthorized"))
         return f(*args, **kwargs)
     return decorated
 
 
-@app.route("/")
-def index():
-    # If logged in, go to dashboard; otherwise redirect to login
-    if session.get("user"):
-        return redirect(url_for("dashboard"))
+# Auth routes (signup, login)
+@app.route("/signup", methods=["GET", "POST"])
+def signup():
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        password = request.form.get("password") or ""
+        if not email or not password:
+            flash("Provide email and password.", "warning")
+            return redirect(url_for("signup"))
+        user, err = create_user(email, password)
+        if user:
+            session["user_id"] = user.id
+            session["user_email"] = user.email
+            session.permanent = True
+            flash("Signup successful. You are now logged in.", "success")
+            return redirect(url_for("dashboard"))
+        else:
+            flash(f"Signup failed: {err}", "danger")
+            return redirect(url_for("signup"))
+    return render_template("signup.html")
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    # GET shows login form; POST attempts authentication
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        password = request.form.get("password") or ""
+        if not email or not password:
+            flash("Provide email and password.", "warning")
+            return redirect(url_for("login"))
+        user = authenticate_user(email, password)
+        if user:
+            session["user_id"] = user.id
+            session["user_email"] = user.email
+            session.permanent = True
+            flash("Logged in.", "success")
+            # After login, go to dashboard
+            return redirect(url_for("dashboard"))
+        else:
+            flash("Invalid email or password.", "danger")
+            return redirect(url_for("login"))
+    return render_template("login.html")
+
+
+# Explicit 401 page route
+@app.route("/401")
+def unauthorized():
+    # Use 401 status for the response
+    return render_template("401.html"), 401
+
+
+# 404 handler: custom page
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template("404.html"), 404
+
+
+# Logout route (you allowed adding it)
+@app.route("/logout")
+def logout():
+    session.clear()
+    flash("You have been logged out.", "info")
     return redirect(url_for("login"))
 
 
-@app.route("/login")
-def login():
-    """
-    Redirect user to Cognito Hosted UI.
-    Accepts optional ?next=<url> to return the user after login.
-    """
-    if not all([COGNITO_DOMAIN, COGNITO_CLIENT_ID, COGNITO_REDIRECT_URI]):
-        return "Cognito not configured. Set COGNITO_DOMAIN, COGNITO_CLIENT_ID, and COGNITO_REDIRECT_URI.", 500
-
-    next_url = request.args.get("next") or url_for("dashboard", _external=True)
-
-    params = {
-        "response_type": "code",
-        "client_id": COGNITO_CLIENT_ID,
-        "redirect_uri": COGNITO_REDIRECT_URI,
-        "scope": "openid email profile",
-        # Put the next_url into state so we can redirect there after callback
-        "state": next_url,
-    }
-    login_url = f"{COGNITO_DOMAIN}/login?{urlencode(params)}"
-    return redirect(login_url)
-
-
-@app.route("/callback")
-def callback():
-    """
-    Cognito redirects back here with ?code=...&state=...
-    Exchange the code for tokens and store user info in session.
-    """
-    code = request.args.get("code")
-    state = request.args.get("state")  # our next URL
-    if not code:
-        flash("Missing authorization code from Cognito.", "danger")
-        return redirect(url_for("index"))
-
-    token_url = f"{COGNITO_DOMAIN}/oauth2/token"
-    client_id = COGNITO_CLIENT_ID
-    client_secret = COGNITO_CLIENT_SECRET
-    redirect_uri = COGNITO_REDIRECT_URI
-
-    # Basic auth header for client credentials
-    auth_str = f"{client_id}:{client_secret or ''}"
-    b64 = base64.b64encode(auth_str.encode()).decode()
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "Authorization": f"Basic {b64}",
-    }
-
-    data = {
-        "grant_type": "authorization_code",
-        "code": code,
-        "redirect_uri": redirect_uri,
-    }
-
-    try:
-        resp = requests.post(token_url, headers=headers, data=data, timeout=10)
-    except Exception as e:
-        flash(f"Token exchange request failed: {e}", "danger")
-        return redirect(url_for("index"))
-
-    if resp.status_code != 200:
-        flash(
-            f"Token exchange failed: {resp.status_code} {resp.text}", "danger")
-        return redirect(url_for("index"))
-
-    tokens = resp.json()
-    id_token = tokens.get("id_token")
-    if not id_token:
-        flash("No id_token returned from Cognito.", "danger")
-        return redirect(url_for("index"))
-
-    # Decode JWT payload (no signature verification) to get user claims
-    try:
-        parts = id_token.split(".")
-        if len(parts) < 2:
-            raise ValueError("Invalid id_token format")
-        payload_b64 = parts[1]
-        # add padding if necessary
-        rem = len(payload_b64) % 4
-        if rem:
-            payload_b64 += "=" * (4 - rem)
-        payload_bytes = base64.urlsafe_b64decode(payload_b64)
-        user_claims = json.loads(payload_bytes)
-    except Exception as e:
-        flash(f"Failed to decode id_token: {e}", "danger")
-        return redirect(url_for("index"))
-
-    # Store user info in session
-    session["user"] = user_claims
-    session.permanent = True
-
-    # Redirect to original next URL if present
-    next_url = state or url_for("dashboard")
-    return redirect(next_url)
+# App routes (protected)
+@app.route("/")
+def index():
+    if session.get("user_id"):
+        return redirect(url_for("dashboard"))
+    return render_template("login.html")
 
 
 @app.route("/dashboard", methods=["GET"])
@@ -224,33 +250,19 @@ def dashboard():
 
     if not DEVICE_ID:
         flash("DEVICE_ID missing in configuration.", "danger")
-        return render_template(
-            "dashboard.html",
-            readings=[],
-            device_id=None,
-            page=1,
-            per_page=per_page,
-            start_idx=0,
-            end_idx=0,
-            has_next=False,
-            has_prev=False,
-            total_pages=1,
-        )
+        return render_template("dashboard.html", readings=[], device_id=None)
 
-    # FULL SCAN — collects all entries with matching thing_id
     results = []
     last_key = None
-
     try:
         while True:
-            kwargs = {"Limit": 1000}
+            params = {"Limit": 1000}
             if last_key:
-                kwargs["ExclusiveStartKey"] = last_key
-            # Try to project only payload for efficiency; fall back if fails
+                params["ExclusiveStartKey"] = last_key
             try:
-                resp = table.scan(**kwargs, ProjectionExpression="payload")
+                resp = table.scan(**params, ProjectionExpression="payload")
             except Exception:
-                resp = table.scan(**kwargs)
+                resp = table.scan(**params)
 
             for item in resp.get("Items", []):
                 parsed = parse_payload_item(item)
@@ -260,45 +272,23 @@ def dashboard():
             last_key = resp.get("LastEvaluatedKey")
             if not last_key:
                 break
-
     except (BotoCoreError, ClientError) as e:
-        flash(f"Error scanning DynamoDB: {e}", "danger")
-        return render_template(
-            "dashboard.html",
-            readings=[],
-            device_id=DEVICE_ID,
-            page=1,
-            per_page=per_page,
-            start_idx=0,
-            end_idx=0,
-            has_next=False,
-            has_prev=False,
-            total_pages=1,
-        )
+        flash(f"Error reading from DynamoDB: {e}", "danger")
+        return render_template("dashboard.html", readings=[], device_id=DEVICE_ID)
 
-    # Sort newest first
     results.sort(key=lambda r: (r.get("_ts_dt") is None,
                  r.get("_ts_dt")), reverse=True)
-
     total_items = len(results)
     total_pages = max(1, (total_items + per_page - 1) // per_page)
-
     if page > total_pages:
         page = total_pages
-
     start_idx = (page - 1) * per_page
     end_idx = start_idx + per_page
     page_items = results[start_idx:end_idx]
-
     for r in page_items:
         dt = r.get("_ts_dt")
         r["_ts_display"] = dt.isoformat() if dt else r.get("timestamp", "—")
 
-    has_prev = page > 1
-    has_next = page < total_pages
-
-    # Optionally pass current user's email/name to template for display
-    user = session.get("user", {})
     return render_template(
         "dashboard.html",
         readings=page_items,
@@ -307,10 +297,10 @@ def dashboard():
         per_page=per_page,
         start_idx=start_idx + 1 if page_items else 0,
         end_idx=start_idx + len(page_items),
-        has_prev=has_prev,
-        has_next=has_next,
+        has_prev=(page > 1),
+        has_next=(page < total_pages),
         total_pages=total_pages,
-        user=user,
+        user_email=session.get("user_email"),
     )
 
 
@@ -320,7 +310,6 @@ def publish_command():
     topic = request.form.get("topic") or "mesa/weather/readings"
     payload_text = request.form.get("payload", "").strip()
     command_text = request.form.get("command", "").strip()
-
     if not payload_text and not command_text:
         flash("Provide a command or JSON payload.", "warning")
         return redirect(url_for("dashboard"))
