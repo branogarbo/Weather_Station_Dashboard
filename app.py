@@ -4,9 +4,9 @@ from datetime import datetime
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from dotenv import load_dotenv
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
 import pytz
 from authlib.integrations.flask_client import OAuth
+from functools import wraps
 
 
 # Load .env
@@ -82,6 +82,15 @@ def parse_payload_item(item):
     return data
 
 
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('user'):
+            return redirect(url_for('login'))
+        return f(*args, **kwargs)
+    return decorated
+
+
 @app.route('/')
 def index():
     user = session.get('user')
@@ -114,6 +123,7 @@ def logout():
 
 
 @app.route("/dashboard", methods=["GET"])
+@login_required
 def dashboard():
     page = request.args.get("page", type=int) or 1
     per_page = request.args.get("per_page", type=int) or 10
@@ -195,6 +205,7 @@ def dashboard():
 
 
 @app.route("/publish", methods=["POST"])
+@login_required
 def publish_command():
     # DEFAULT TOPIC UPDATED HERE
     topic = request.form.get("topic") or "mesa/weather/readings"
