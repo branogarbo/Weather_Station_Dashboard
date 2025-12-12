@@ -11,20 +11,19 @@
     <link id="bootswatch-theme-stylesheet" rel="stylesheet"
         href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
 
-    <!-- PREFETCH + PRELOAD ALL BOOTSWATCH THEMES FOR INSTANT SWITCHING -->
+    <!-- PREFETCH & PRELOAD Bootswatch themes -->
     {% set themes = [
     "cerulean","cosmo","cyborg","darkly","flatly","journal","litera","lumen",
     "lux","materia","minty","morph","pulse","quartz","sandstone","simplex",
     "sketchy","slate","solar","spacelab","superhero","united","vapor","yeti","zephyr"
     ] %}
 
-    <!-- Default Bootstrap -->
     <link rel="prefetch" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" as="style">
 
     {% for theme in themes %}
-    <link rel="prefetch" as="style"
-        href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.8/dist/{{ theme }}/bootstrap.min.css">
     <link rel="preload" as="style"
+        href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.8/dist/{{ theme }}/bootstrap.min.css">
+    <link rel="prefetch" as="style"
         href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.8/dist/{{ theme }}/bootstrap.min.css">
     {% endfor %}
 
@@ -34,25 +33,49 @@
         }
 
         footer {
-            padding: 16px 0;
+            padding: 12px 0;
             text-align: center;
-            opacity: 0.8;
+            opacity: 0.85;
             font-size: 0.9rem;
         }
 
         .dropdown-item.active {
             font-weight: bold;
         }
+
+        ::placeholder {
+            opacity: 0.7 !important;
+            color: inherit !important;
+        }
+
+        /* New separator styling for Device ID / Email */
+        .nav-separator {
+            color: rgba(255, 255, 255, 0.55);
+            margin: 0 0.6rem;
+            font-weight: 300;
+            font-size: 1.1rem;
+        }
+
+        .nav-user-email {
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.9rem;
+        }
+
+        /* Hide email & separator on extra small screens */
+        @media (max-width: 575px) {
+
+            .nav-user-email,
+            .nav-separator {
+                display: none !important;
+            }
+        }
     </style>
 </head>
 
 <body>
-
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary mb-4">
         <div class="container">
-            <a class="navbar-brand" href="{{ url_for('index') }}">
-                Weather Dashboard
-            </a>
+            <a class="navbar-brand" href="{{ url_for('index') }}">Weather Dashboard</a>
 
             <div class="collapse navbar-collapse justify-content-end">
                 <ul class="navbar-nav align-items-center">
@@ -60,31 +83,52 @@
                     <!-- Theme dropdown -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" id="themeDropdownToggle" role="button"
-                            data-bs-toggle="dropdown" aria-expanded="false">
-                            Theme
-                        </a>
+                            data-bs-toggle="dropdown">Theme</a>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="themeDropdownToggle">
-                            <li><a class="dropdown-item theme-selector" data-theme="default" href="#">Default</a></li>
+                            <li><a class="dropdown-item theme-item" data-theme="default" href="#">Default</a></li>
                             {% for theme in themes %}
-                            <li><a class="dropdown-item theme-selector" data-theme="{{ theme }}" href="#">{{
+                            <li><a class="dropdown-item theme-item" data-theme="{{ theme }}" href="#">{{
                                     theme|capitalize }}</a></li>
                             {% endfor %}
                         </ul>
                     </li>
 
+                    {% if session.get('user_id') %}
+
+                    {% if session.get('is_admin') %}
                     <li class="nav-item">
-                        <span class="nav-link">
-                            Device: <strong>{{ device_id or "—" }}</strong>
-                        </span>
+                        <a class="nav-link" href="{{ url_for('admin_list_users') }}">Admin</a>
+                    </li>
+                    {% endif %}
+
+                    <!-- Device ID -->
+                    <li class="nav-item">
+                        <span class="nav-link">Device: <strong>{{ device_id or '—' }}</strong></span>
                     </li>
 
-                    <!-- UPDATED: REAL BUTTON, NO WARNING STYLE -->
+                    <!-- Separator -->
+                    <li class="nav-item">
+                        <span class="nav-separator">|</span>
+                    </li>
+
+                    <!-- User email -->
+                    <li class="nav-item d-flex align-items-center">
+                        <span class="nav-user-email">{{ session.get('user_email') }}</span>
+                    </li>
+
+                    <!-- Logout -->
                     <li class="nav-item ms-2">
-                        <a class="btn btn-outline-light btn-sm" href="/logout">
-                            Logout
-                        </a>
+                        <a class="btn btn-outline-light btn-sm" href="{{ url_for('logout') }}">Logout</a>
                     </li>
 
+                    {% else %}
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('login') }}">Login</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="{{ url_for('signup') }}">Register</a>
+                    </li>
+                    {% endif %}
                 </ul>
             </div>
         </div>
@@ -101,7 +145,6 @@
         {% endfor %}
         {% endif %}
         {% endwith %}
-
         {% block content %}{% endblock %}
     </main>
 
@@ -109,45 +152,54 @@
         © {{ now().year if now else "2025" }} Brian Longmore. All rights reserved.
     </footer>
 
+    <!-- Bootstrap -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
+    <!-- Theme switching logic -->
     <script>
         const themeLink = document.getElementById("bootswatch-theme-stylesheet");
 
         function bootswatchUrl(theme) {
-            if (theme === "default") {
-                return "https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css";
-            }
-            return `https://cdn.jsdelivr.net/npm/bootswatch@5.3.8/dist/${theme}/bootstrap.min.css`;
+            return (!theme || theme === "default")
+                ? "https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css"
+                : `https://cdn.jsdelivr.net/npm/bootswatch@5.3.8/dist/${theme}/bootstrap.min.css`;
         }
 
-        function applyTheme(theme) {
+        async function applyAndSaveTheme(theme) {
             themeLink.href = bootswatchUrl(theme);
-            localStorage.setItem("selectedBootswatchTheme", theme);
-        }
+            try { localStorage.setItem("selectedBootswatchTheme", theme); } catch (e) { }
 
-        function markActive(theme) {
-            document.querySelectorAll(".theme-selector").forEach(el => {
-                el.classList.toggle("active", el.dataset.theme === theme);
-            });
+            // Silent server save
+            try {
+                await fetch("/me/theme", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+                    body: new URLSearchParams({ theme })
+                });
+            } catch (err) {
+                console.debug("Failed saving theme to server:", err);
+            }
         }
 
         document.addEventListener("DOMContentLoaded", () => {
-            const saved = localStorage.getItem("selectedBootswatchTheme") || "default";
-            applyTheme(saved);
-            markActive(saved);
+            const serverTheme = "{{ server_theme or '' }}";
+            let saved = null;
+            try { saved = localStorage.getItem("selectedBootswatchTheme"); } catch (e) { }
+            const initial = serverTheme || saved || "default";
+            themeLink.href = bootswatchUrl(initial);
 
-            document.querySelectorAll(".theme-selector").forEach(item => {
+            document.querySelectorAll(".theme-item").forEach(item => {
+                item.classList.toggle("active", item.dataset.theme === initial);
                 item.addEventListener("click", e => {
                     e.preventDefault();
-                    const theme = item.dataset.theme;
-                    applyTheme(theme);
-                    markActive(theme);
+                    const t = item.dataset.theme;
+                    document.querySelectorAll(".theme-item").forEach(i => i.classList.remove("active"));
+                    item.classList.add("active");
+                    applyAndSaveTheme(t);
                 });
             });
         });
     </script>
-
 </body>
 
 </html>

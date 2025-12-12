@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h3>Users & Theme Management</h3>
+
+        <div class="mb-3">
+            <form method="post" action="{{ url_for('admin_set_global_theme') }}" class="d-flex align-items-center">
+                <label class="me-2 mb-0">Global default theme:</label>
+                <select name="global_theme" class="form-select form-select-sm me-2" style="width: 220px;">
+                    <option value="">Default</option>
+                    {% for t in [
+                    "cerulean","cosmo","cyborg","darkly","flatly","journal","litera","lumen",
+                    "lux","materia","minty","morph","pulse","quartz","sandstone","simplex",
+                    "sketchy","slate","solar","spacelab","superhero","united","vapor","yeti","zephyr"
+                    ] %}
+                    <option value="{{ t }}" {% if global_theme==t %}selected{% endif %}>{{ t|capitalize }}</option>
+                    {% endfor %}
+                </select>
+                <button class="btn btn-sm btn-primary" type="submit">Set Global Theme</button>
+            </form>
+            <div class="form-text small mt-1">Admins can set a global default that applies when users have no personal
+                theme saved.</div>
+        </div>
+
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead class="table-light">
+                    <tr>
+                        <th>Email</th>
+                        <th>Role</th>
+                        <th>Active</th>
+                        <th>Theme</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for u in users %}
+                    <tr>
+                        <td>{{ u.email }}</td>
+                        <td>{{ 'Admin' if u.is_admin else 'User' }}</td>
+                        <td>{{ 'Yes' if u.is_active else 'No' }}</td>
+                        <td>
+                            <form method="post" action="{{ url_for('admin_set_user_theme', user_id=u.id) }}"
+                                class="d-flex align-items-center">
+                                <select name="theme" class="form-select form-select-sm me-2" style="width:160px;">
+                                    <option value="" {% if not u.theme %}selected{% endif %}>Default</option>
+                                    {% for t in [
+                                    "cerulean","cosmo","cyborg","darkly","flatly","journal","litera","lumen",
+                                    "lux","materia","minty","morph","pulse","quartz","sandstone","simplex",
+                                    "sketchy","slate","solar","spacelab","superhero","united","vapor","yeti","zephyr"
+                                    ] %}
+                                    <option value="{{ t }}" {% if u.theme==t %}selected{% endif %}>{{ t|capitalize }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                                <button class="btn btn-sm btn-outline-primary" type="submit">Set</button>
+                            </form>
+                        </td>
+                        <td>
+                            {% if u.id != current_user_id %}
+                            <form method="post" action="{{ url_for('admin_toggle_user', user_id=u.id) }}"
+                                style="display:inline;">
+                                <button
+                                    class="btn btn-sm {% if u.is_active %}btn-outline-danger{% else %}btn-outline-success{% endif %}"
+                                    type="submit">
+                                    {% if u.is_active %}Deactivate{% else %}Activate{% endif %}
+                                </button>
+                            </form>
+                            {% else %}
+                            <em class="text-muted">Self</em>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

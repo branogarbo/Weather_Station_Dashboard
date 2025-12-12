@@ -1,0 +1,17 @@
+# services:
+#   final:
+#     image: final
+#     build:
+#       context: .
+#       dockerfile: ./Dockerfile
+#     ports:
+#       - 3000:3000
+
+services:
+  weather_station_dashboard:
+    image: branodock/weather_station_dashboard
+    container_name: weather_station_dashboard
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - 3000:3000

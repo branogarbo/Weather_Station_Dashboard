@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-8 text-center">
+        <h1 class="display-4">405</h1>
+        <p class="lead">Method Not Allowed.</p>
+        <p>You tried to access a page using an unsupported method.</p>
+        <a class="btn btn-secondary mt-3" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+    </div>
+</div>
+{% endblock %}
