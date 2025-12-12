@@ -234,7 +234,7 @@ def fetch_readings_page(limit=50, last_key_token=None):
 def index():
     user = session.get('user')
     if user:
-        return redirect(url_for('dashboard'))
+        return f'Hello, {user["email"]}. <a href="/logout">Logout</a>'
     else:
         return f'Welcome! Please <a href="/login">Login</a>.'
 
@@ -244,7 +244,7 @@ def login():
     # Alternate option to redirect to /authorize
     # redirect_uri = url_for('authorize', _external=True)
     # return oauth.oidc.authorize_redirect(redirect_uri)
-    return oauth.oidc.authorize_redirect('https://weather.brano.dev')
+    return oauth.oidc.authorize_redirect('https://weather.brano.dev/dashboard')
 
 
 @app.route('/authorize')
