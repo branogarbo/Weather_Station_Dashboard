@@ -565,7 +565,7 @@ def dashboard():
 @app.route("/publish", methods=["POST"])
 @login_required
 def publish_command():
-    topic = request.form.get("topic") or "mesa/weather/readings"
+    topic = request.form.get("topic") or "devices/station-001/command"
     payload_text = request.form.get("payload", "").strip()
     command_text = request.form.get("command", "").strip()
     if not payload_text and not command_text:
