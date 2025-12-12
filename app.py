@@ -242,9 +242,9 @@ def index():
 @app.route('/login')
 def login():
     # Alternate option to redirect to /authorize
-    # redirect_uri = url_for('authorize', _external=True)
-    # return oauth.oidc.authorize_redirect(redirect_uri)
-    return oauth.oidc.authorize_redirect('https://weather.brano.dev/dashboard')
+    redirect_uri = url_for('authorize', _external=True)
+    return oauth.oidc.authorize_redirect(redirect_uri)
+    # return oauth.oidc.authorize_redirect('https://weather.brano.dev')
 
 
 @app.route('/authorize')
