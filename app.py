@@ -181,7 +181,7 @@ def dashboard():
     has_next = page < total_pages
 
     return render_template(
-        "index.html",
+        "dashboard.html",
         readings=page_items,
         device_id=DEVICE_ID,
         page=page,
