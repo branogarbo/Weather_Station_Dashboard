@@ -123,7 +123,7 @@ def dashboard():
 
     if not DEVICE_ID:
         flash("DEVICE_ID missing in configuration.", "danger")
-        return render_template("index.html",
+        return render_template("dashboard.html",
                                readings=[], device_id=None, page=1,
                                per_page=per_page, start_idx=0, end_idx=0,
                                has_next=False, has_prev=False, total_pages=1)
@@ -154,7 +154,7 @@ def dashboard():
 
     except Exception as e:
         flash(f"Error scanning DynamoDB: {e}", "danger")
-        return render_template("index.html",
+        return render_template("dashboard.html",
                                readings=[], device_id=DEVICE_ID, page=1,
                                per_page=per_page, start_idx=0, end_idx=0,
                                has_next=False, has_prev=False, total_pages=1)
