@@ -1,11 +1,13 @@
 import os
 import json
 from datetime import datetime
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, flash, session
 from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import pytz
+from authlib.integrations.flask_client import OAuth
+
 
 # Load .env
 load_dotenv()
@@ -15,6 +17,7 @@ DDB_TABLE = os.getenv("DDB_TABLE", "weather_station_thing_readings")
 FLASK_SECRET = os.getenv("FLASK_SECRET")
 DEVICE_ID = os.getenv("DEVICE_ID")
 PORT = int(os.getenv("PORT", "5000"))
+COGNITO_CLIENT_SECRET = os.getenv("COGNITO_CLIENT_SECRET")
 
 if FLASK_SECRET is None:
     raise RuntimeError("FLASK_SECRET is required")
@@ -26,6 +29,17 @@ dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 table = dynamodb.Table(DDB_TABLE)
 
 _iot_data_client = None
+
+oauth = OAuth(app)
+
+oauth.register(
+    name='oidc',
+    authority='https://cognito-idp.us-east-1.amazonaws.com/us-east-1_aCQtIuz03',
+    client_id='73thd11qu94teddjel6l97g48j',
+    client_secret=COGNITO_CLIENT_SECRET,
+    server_metadata_url='https://cognito-idp.us-east-1.amazonaws.com/us-east-1_aCQtIuz03/.well-known/openid-configuration',
+    client_kwargs={'scope': 'email openid phone'}
+)
 
 
 def get_iot_data_client():
@@ -68,8 +82,39 @@ def parse_payload_item(item):
     return data
 
 
-@app.route("/", methods=["GET"])
+@app.route('/')
 def index():
+    user = session.get('user')
+    if user:
+        return f'Hello, {user["email"]}. <a href="/logout">Logout</a>'
+    else:
+        return f'Welcome! Please <a href="/login">Login</a>.'
+
+
+@app.route('/login')
+def login():
+    # Alternate option to redirect to /authorize
+    # redirect_uri = url_for('authorize', _external=True)
+    # return oauth.oidc.authorize_redirect(redirect_uri)
+    return oauth.oidc.authorize_redirect('https://weather.brano.dev/dashboard')
+
+
+@app.route('/authorize')
+def authorize():
+    token = oauth.oidc.authorize_access_token()
+    user = token['userinfo']
+    session['user'] = user
+    return redirect(url_for('index'))
+
+
+@app.route('/logout')
+def logout():
+    session.pop('user', None)
+    return redirect(url_for('index'))
+
+
+@app.route("/dashboard", methods=["GET"])
+def dashboard():
     page = request.args.get("page", type=int) or 1
     per_page = request.args.get("per_page", type=int) or 10
     per_page = max(1, min(per_page, 200))
