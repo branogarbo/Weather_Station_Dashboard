@@ -88,7 +88,7 @@ def index():
     if user:
         return f'Hello, {user["email"]}. <a href="/logout">Logout</a>'
     else:
-        return f'Welcome! Please <a href="/login">Login</a>.'
+        return redirect(url_for('login'))
 
 
 @app.route('/login')
