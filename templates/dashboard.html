@@ -18,9 +18,7 @@
 
             <div class="d-flex align-items-center">
 
-                <!-- Per-page selection -->
                 <form class="me-2" method="get" action="{{ url_for('dashboard') }}">
-                    <!-- reset to first page when changing per_page -->
                     <input type="hidden" name="page" value="1">
                     <div class="input-group input-group-sm">
                         <label class="input-group-text" for="per_page_select">Per page</label>
@@ -34,7 +32,6 @@
                     </div>
                 </form>
 
-                <!-- Pagination -->
                 <nav aria-label="pagination">
                     <ul class="pagination pagination-sm mb-0">
 
@@ -112,7 +109,6 @@
         <h4>Publish Command</h4>
         <form method="post" action="{{ url_for('publish_command') }}">
 
-            <!-- Topic placeholder matches server default -->
             <div class="mb-3">
                 <label class="form-label">Topic</label>
                 <input class="form-control" name="topic" placeholder="devices/station-001/command">

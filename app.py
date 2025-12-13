@@ -1,13 +1,3 @@
-"""
-app.py
-
-RDS-backed auth with admin vs standard users, per-user/global theme persistence,
-signup with password confirmation, admin activation workflow, DynamoDB dashboard,
-MQTT publishing, and custom error pages (401/404/405).
-
-Corrected dashboard pagination, per-page handling, payload parsing/display, and
-sorting so the latest entries are shown first.
-"""
 import os
 import json
 from datetime import datetime
@@ -30,7 +20,6 @@ import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 import pytz
 
-# SQLAlchemy
 from sqlalchemy import (
     Column,
     Integer,
@@ -44,14 +33,10 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy import create_engine
 
-# password hashing
 from werkzeug.security import generate_password_hash, check_password_hash
 
 load_dotenv()
 
-# ---------------------
-# Config
-# ---------------------
 AWS_REGION = os.getenv("WS_REGION", "us-east-1")
 DDB_TABLE = os.getenv("DDB_TABLE", "weather_station_thing_readings")
 FLASK_SECRET = os.getenv("FLASK_SECRET")
@@ -68,9 +53,6 @@ app = Flask(__name__)
 app.secret_key = FLASK_SECRET
 app.config.setdefault("PERMANENT_SESSION_LIFETIME", 7 * 24 * 3600)
 
-# ---------------------
-# DB setup
-# ---------------------
 Base = declarative_base()
 engine = create_engine(DATABASE_URL, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(
@@ -99,12 +81,8 @@ class Setting(Base):
     value = Column(Text, nullable=True)
 
 
-# create tables if needed
 Base.metadata.create_all(bind=engine)
 
-# ---------------------
-# AWS resources
-# ---------------------
 dynamodb = boto3.resource("dynamodb", region_name=AWS_REGION)
 table = dynamodb.Table(DDB_TABLE)
 _iot_data_client = None
@@ -149,9 +127,6 @@ def parse_payload_item(item):
     return data
 
 
-# ---------------------
-# Helper functions
-# ---------------------
 def get_setting(key: str):
     db = SessionLocal()
     try:
@@ -223,9 +198,6 @@ def authenticate_user(email: str, password: str):
         db.close()
 
 
-# ---------------------
-# Decorators
-# ---------------------
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -261,9 +233,6 @@ def admin_required(f):
     return decorated
 
 
-# ---------------------
-# Context processor
-# ---------------------
 @app.context_processor
 def inject_globals():
     device = DEVICE_ID or "—"
@@ -287,9 +256,6 @@ def inject_globals():
     return dict(device_id=device, server_theme=server_theme)
 
 
-# ---------------------
-# Auth routes
-# ---------------------
 @app.route("/signup", methods=["GET", "POST"])
 def signup():
     if request.method == "POST":
@@ -380,9 +346,6 @@ def method_not_allowed(e):
     return render_template("405.html"), 405
 
 
-# ---------------------
-# Admin routes
-# ---------------------
 @app.route("/admin/users", methods=["GET"])
 @admin_required
 def admin_list_users():
@@ -458,9 +421,6 @@ def admin_set_global_theme():
     return redirect(url_for("admin_list_users"))
 
 
-# ---------------------
-# User theme API
-# ---------------------
 @app.route("/me/theme", methods=["POST"])
 @login_required
 def set_my_theme():
@@ -484,9 +444,6 @@ def set_my_theme():
         db.close()
 
 
-# ---------------------
-# App routes
-# ---------------------
 @app.route("/")
 def index():
     if session.get("user_id"):
@@ -494,9 +451,6 @@ def index():
     return redirect(url_for("login"))
 
 
-# ---------------------
-# DASHBOARD (corrected sorting: newest first)
-# ---------------------
 @app.route("/dashboard", methods=["GET"])
 @login_required
 def dashboard():
@@ -535,7 +489,6 @@ def dashboard():
         flash(f"Error reading from DynamoDB: {e}", "danger")
         return render_template("dashboard.html", readings=[], device_id=DEVICE_ID)
 
-    # === SORT NEWEST FIRST ===
     results.sort(
         key=lambda r: r.get("_ts_dt") or datetime.min.replace(tzinfo=pytz.UTC),
         reverse=True
@@ -550,7 +503,6 @@ def dashboard():
     end_idx = start_idx + per_page
     page_items = results[start_idx:end_idx]
 
-    # Prepare for rendering
     for r in page_items:
         dt = r.get("_ts_dt")
         r["_ts_display"] = dt.isoformat() if dt else r.get("timestamp", "—")
@@ -599,8 +551,5 @@ def publish_command():
     return redirect(url_for("dashboard"))
 
 
-# ---------------------
-# Run
-# ---------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT, debug=True)
