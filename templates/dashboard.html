@@ -19,7 +19,8 @@
             <div class="d-flex align-items-center">
 
                 <!-- Per-page selection -->
-                <form class="me-2" method="get" action="{{ url_for('index') }}">
+                <form class="me-2" method="get" action="{{ url_for('dashboard') }}">
+                    <!-- reset to first page when changing per_page -->
                     <input type="hidden" name="page" value="1">
                     <div class="input-group input-group-sm">
                         <label class="input-group-text" for="per_page_select">Per page</label>
@@ -38,12 +39,12 @@
                     <ul class="pagination pagination-sm mb-0">
 
                         <li class="page-item {% if page == 1 %}disabled{% endif %}">
-                            <a class="page-link" href="{{ url_for('index', page=1, per_page=per_page) }}">First</a>
+                            <a class="page-link" href="{{ url_for('dashboard', page=1, per_page=per_page) }}">First</a>
                         </li>
 
                         <li class="page-item {% if not has_prev %}disabled{% endif %}">
                             <a class="page-link"
-                                href="{% if has_prev %}{{ url_for('index', page=page-1, per_page=per_page) }}{% endif %}">Previous</a>
+                                href="{% if has_prev %}{{ url_for('dashboard', page=page-1, per_page=per_page) }}{% endif %}">Previous</a>
                         </li>
 
                         <li class="page-item disabled">
@@ -52,12 +53,12 @@
 
                         <li class="page-item {% if not has_next %}disabled{% endif %}">
                             <a class="page-link"
-                                href="{% if has_next %}{{ url_for('index', page=page+1, per_page=per_page) }}{% endif %}">Next</a>
+                                href="{% if has_next %}{{ url_for('dashboard', page=page+1, per_page=per_page) }}{% endif %}">Next</a>
                         </li>
 
                         <li class="page-item {% if page == total_pages %}disabled{% endif %}">
                             <a class="page-link"
-                                href="{{ url_for('index', page=total_pages, per_page=per_page) }}">Last</a>
+                                href="{{ url_for('dashboard', page=total_pages, per_page=per_page) }}">Last</a>
                         </li>
 
                     </ul>
@@ -88,10 +89,10 @@
 
                         <td>
                             <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse"
-                                data-bs-target="#raw{{ loop.index }}">
+                                data-bs-target="#raw{{ loop.index0 + start_idx }}">
                                 View
                             </button>
-                            <div class="collapse mt-2" id="raw{{ loop.index }}">
+                            <div class="collapse mt-2" id="raw{{ loop.index0 + start_idx }}">
                                 <pre style="white-space: pre-wrap;">{{ r | tojson(indent=2) }}</pre>
                             </div>
                         </td>
@@ -111,7 +112,7 @@
         <h4>Publish Command</h4>
         <form method="post" action="{{ url_for('publish_command') }}">
 
-            <!-- UPDATED TOPIC PLACEHOLDER -->
+            <!-- Topic placeholder matches server default -->
             <div class="mb-3">
                 <label class="form-label">Topic</label>
                 <input class="form-control" name="topic" placeholder="devices/station-001/command">
@@ -122,12 +123,13 @@
 
             <div class="mb-3">
                 <label class="form-label">JSON Payload</label>
-                <textarea class="form-control" name="payload" rows="4" placeholder='{"action":"led_on"}'></textarea>
+                <textarea class="form-control" name="payload" rows="4"
+                    placeholder='{"action":"request_health_check"}'></textarea>
             </div>
 
             <div class="mb-3">
                 <label class="form-label">Quick Command</label>
-                <input class="form-control" name="command" placeholder="toggle_fan">
+                <input class="form-control" name="command" placeholder="ToggleDataSend">
             </div>
 
             <button class="btn btn-primary" type="submit">Publish</button>

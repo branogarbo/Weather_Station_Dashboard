@@ -5,7 +5,8 @@ RDS-backed auth with admin vs standard users, per-user/global theme persistence,
 signup with password confirmation, admin activation workflow, DynamoDB dashboard,
 MQTT publishing, and custom error pages (401/404/405).
 
-Replace your broken file with this corrected version.
+Corrected dashboard pagination, per-page handling, payload parsing/display, and
+sorting so the latest entries are shown first.
 """
 import os
 import json
@@ -493,6 +494,9 @@ def index():
     return redirect(url_for("login"))
 
 
+# ---------------------
+# DASHBOARD (corrected sorting: newest first)
+# ---------------------
 @app.route("/dashboard", methods=["GET"])
 @login_required
 def dashboard():
@@ -531,8 +535,12 @@ def dashboard():
         flash(f"Error reading from DynamoDB: {e}", "danger")
         return render_template("dashboard.html", readings=[], device_id=DEVICE_ID)
 
-    results.sort(key=lambda r: (r.get("_ts_dt") is None,
-                 r.get("_ts_dt")), reverse=True)
+    # === SORT NEWEST FIRST ===
+    results.sort(
+        key=lambda r: r.get("_ts_dt") or datetime.min.replace(tzinfo=pytz.UTC),
+        reverse=True
+    )
+
     total_items = len(results)
     total_pages = max(1, (total_items + per_page - 1) // per_page)
     if page > total_pages:
@@ -542,9 +550,11 @@ def dashboard():
     end_idx = start_idx + per_page
     page_items = results[start_idx:end_idx]
 
+    # Prepare for rendering
     for r in page_items:
         dt = r.get("_ts_dt")
         r["_ts_display"] = dt.isoformat() if dt else r.get("timestamp", "—")
+        r.pop("_ts_dt", None)
 
     return render_template(
         "dashboard.html",
@@ -574,7 +584,7 @@ def publish_command():
 
     try:
         publish_payload = json.dumps(json.loads(
-            payload_text)) if payload_text else json.dumps({"command": command_text})
+            payload_text)) if payload_text else command_text
     except Exception:
         publish_payload = payload_text
 
